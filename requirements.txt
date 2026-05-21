@@ -1,0 +1,23 @@
+# Lista de dependencias de python
+fastapi[all] #framework
+uvicorn #servidor
+sqlalchemy[asyncio]>=2.0.0 #ORM asincronico
+asyncpg #optimizacion asincronica para postgreSQL
+pydantic-settings #validacion .env
+geoalchemy2 #PostGIS
+alembic #control de versiones BD
+python-jose[cryptography] #JWT
+werkzeug #bcrypt
+python-multipart #OAuth2
+psycopg2-binary #sincrono
+shapely # convertir coordenadas a objetos
+
+# AI / ML (optimizado para la nube)
+groq>=0.4.0    # Groq API para LLM y Whisper
+Pillow>=10.0.0 # Procesamiento básico de imágenes
+requests>=2.31.0 # Para APIs externas
+
+
+# Firebase Cloud Messaging
+google-auth>=2.23.0  # Para FCM API v1
+httpx>=0.25.0  # Cliente HTTP asíncrono

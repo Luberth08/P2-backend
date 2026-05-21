@@ -1,0 +1,7 @@
+Generic single-database configuration.
+
+## Configuración de IA local
+
+1. Ejecuta `bash scripts/install_ai_deps.sh`
+2. Asegúrate que Ollama esté corriendo: `ollama serve`
+3. Verifica que el modelo esté disponible: `ollama list`

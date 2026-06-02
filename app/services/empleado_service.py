@@ -43,7 +43,7 @@ async def create_empleado(
     empleado_data = {
         "id_usuario": usuario.id,
         "id_taller": id_taller,
-        "estado": EstadoEmpleado.activo,
+        "estado": EstadoEmpleado.disponible,
     }
     nuevo_empleado = await crud_empleado.create(db, empleado_data)  # solo flush
     # Asignar rol en rol_usuario (si no lo tiene ya)

@@ -42,11 +42,12 @@ class CRUDEmpleado(CRUDBase[Empleado]):
         return empleado
 
     async def get_active_by_usuario_taller(self, db: AsyncSession, id_usuario: int, id_taller: int) -> Optional[Empleado]:
+        """Obtiene un empleado activo (no suspendido) de un usuario en un taller"""
         result = await db.execute(
             select(Empleado).where(
                 Empleado.id_usuario == id_usuario,
                 Empleado.id_taller == id_taller,
-                Empleado.estado.in_([EstadoEmpleado.activo, EstadoEmpleado.disponible, EstadoEmpleado.en_servicio])
+                Empleado.estado.in_([EstadoEmpleado.disponible, EstadoEmpleado.en_servicio])
             )
         )
         return result.scalar_one_or_none()

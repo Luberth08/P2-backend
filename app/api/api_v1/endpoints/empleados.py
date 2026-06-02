@@ -21,7 +21,7 @@ async def crear_empleado(
 @router.get("/", response_model=EmpleadoListResponse)
 async def listar_empleados(
     taller_id: int,
-    estado: Optional[str] = Query(None, description="Filtrar por estado (activo, suspendido)"),
+    estado: Optional[str] = Query(None, description="Filtrar por estado (disponible, en_servicio, suspendido)"),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     current_usuario: Usuario = Depends(require_permiso_en_taller("taller:ver_empleados")),

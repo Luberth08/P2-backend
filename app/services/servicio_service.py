@@ -81,11 +81,12 @@ async def obtener_tecnicos_disponibles(
     id_taller: int
 ) -> List[Dict[str, Any]]:
     """
-    Obtiene técnicos disponibles (no en servicio) de un taller
+    Obtiene técnicos disponibles (no en servicio) de un taller.
+    Agrupa por usuario para evitar duplicados si hay múltiples registros de empleado.
     """
     # Obtener empleados con rol "tecnico" en el taller
     result = await db.execute(
-        select(Empleado).distinct().join(
+        select(Empleado).join(
             Usuario, Usuario.id == Empleado.id_usuario
         ).join(
             RolUsuario, RolUsuario.id_usuario == Usuario.id
@@ -93,7 +94,8 @@ async def obtener_tecnicos_disponibles(
             Rol, Rol.id == RolUsuario.id_rol
         ).where(
             and_(
-                RolUsuario.id_taller == id_taller,
+                Empleado.id_taller == id_taller,  # IMPORTANTE: El empleado debe pertenecer al taller
+                RolUsuario.id_taller == id_taller,  # Y tener el rol en ese taller
                 Rol.nombre == "tecnico",
                 Empleado.estado == EstadoEmpleado.disponible
             )
@@ -102,9 +104,22 @@ async def obtener_tecnicos_disponibles(
     
     empleados = result.scalars().all()
     
+    # Eliminar duplicados: si hay múltiples empleados del mismo usuario, tomar solo el más reciente
+    empleados_por_usuario = {}
+    for empleado in empleados:
+        id_usuario = empleado.id_usuario
+        # Si ya existe este usuario, comparar fechas y quedarse con el más reciente
+        if id_usuario in empleados_por_usuario:
+            empleado_existente = empleados_por_usuario[id_usuario]
+            # Comparar por fecha_ingreso (más reciente = mayor fecha)
+            if empleado.fecha_ingreso > empleado_existente.fecha_ingreso:
+                empleados_por_usuario[id_usuario] = empleado
+        else:
+            empleados_por_usuario[id_usuario] = empleado
+    
     # Obtener especialidades de cada técnico
     tecnicos_info = []
-    for empleado in empleados:
+    for empleado in empleados_por_usuario.values():
         # Obtener especialidades
         from app.models.tecnico_especialidad import TecnicoEspecialidad
         from app.models.especialidad import Especialidad
@@ -197,10 +212,14 @@ async def aceptar_solicitud_servicio(
     
     # Asignar técnicos
     for tecnico_id in tecnicos_ids:
-        # Verificar que el técnico existe y está disponible
+        # Verificar que el técnico existe, está disponible Y pertenece al taller
         empleado = await empleado_crud.get(db, tecnico_id)
         if not empleado:
             raise ValueError(f"Técnico {tecnico_id} no encontrado")
+        
+        # IMPORTANTE: Verificar que el empleado pertenece al taller correcto
+        if empleado.id_taller != id_taller:
+            raise ValueError(f"Técnico {tecnico_id} no pertenece a este taller")
         
         if empleado.estado != EstadoEmpleado.disponible:
             raise ValueError(f"Técnico {tecnico_id} no está disponible")
@@ -213,10 +232,11 @@ async def aceptar_solicitud_servicio(
         
         # Cambiar estado del técnico a en_servicio
         empleado.estado = EstadoEmpleado.en_servicio
+        await db.flush()  # Asegurar que el cambio se persista
     
     # Asignar vehículos
     for vehiculo_id in vehiculos_ids:
-        # Verificar que el vehículo existe y está disponible
+        # Verificar que el vehículo existe, está disponible Y pertenece al taller
         result = await db.execute(
             select(VehiculoTaller).where(VehiculoTaller.id == vehiculo_id)
         )
@@ -224,6 +244,10 @@ async def aceptar_solicitud_servicio(
         
         if not vehiculo:
             raise ValueError(f"Vehículo {vehiculo_id} no encontrado")
+        
+        # IMPORTANTE: Verificar que el vehículo pertenece al taller correcto
+        if vehiculo.id_taller != id_taller:
+            raise ValueError(f"Vehículo {vehiculo_id} no pertenece a este taller")
         
         if vehiculo.estado != EstadoVehiculoTaller.disponible:
             raise ValueError(f"Vehículo {vehiculo_id} no está disponible")
@@ -236,6 +260,7 @@ async def aceptar_solicitud_servicio(
         
         # Cambiar estado del vehículo a en_servicio
         vehiculo.estado = EstadoVehiculoTaller.en_servicio
+        await db.flush()  # Asegurar que el cambio se persista
     
     # Actualizar estado de la solicitud a aceptada
     await solicitud_servicio_crud.update_estado(
@@ -325,6 +350,7 @@ async def completar_servicio(
         empleado = await empleado_crud.get(db, asignacion.id_empleado)
         if empleado:
             empleado.estado = EstadoEmpleado.disponible
+            await db.flush()  # Asegurar que el cambio se persista
     
     # Liberar vehículos
     vehiculos_asignados = await servicio_vehiculo_crud.get_by_servicio(db, id_servicio)
@@ -335,6 +361,7 @@ async def completar_servicio(
         vehiculo = result.scalar_one_or_none()
         if vehiculo:
             vehiculo.estado = EstadoVehiculoTaller.disponible
+            await db.flush()  # Asegurar que el cambio se persista
     
     # Actualizar estado del servicio y calcular métricas
     await actualizar_estado_servicio(db, id_servicio, EstadoServicio.finalizado)

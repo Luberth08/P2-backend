@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.core.deps import get_current_usuario, require_permiso_en_taller
 from app.core.config import settings
 from app.models.usuario import Usuario
+from app.models.persona import Persona
 from app.schemas.servicio import (
     SolicitudServicioListResponse,
     SolicitudServicioDetalleResponse,
@@ -282,13 +283,38 @@ async def aceptar_solicitud(
         # Obtener técnicos asignados
         tecnicos_asignados = await servicio_tecnico_crud.get_by_servicio(db, servicio.id)
         tecnicos_response = []
+        empleados_info = []  # Guardar info de empleados para reutilizar en notificaciones
+        
         for asignacion in tecnicos_asignados:
             empleado = await empleado_crud.get_with_usuario(db, asignacion.id_empleado)
             if empleado:
+                empleados_info.append(empleado)
                 tecnicos_response.append(TecnicoAsignadoResponse(
                     id_empleado=empleado.id,
                     nombre_completo=empleado.usuario.nombre
                 ))
+        
+        # Enviar notificación específica de técnico asignado al cliente
+        try:
+            from sqlalchemy import select
+            for empleado in empleados_info:
+                if empleado.id_persona:
+                    # Obtener la persona del técnico
+                    result = await db.execute(
+                        select(Persona).where(Persona.id == empleado.id_persona)
+                    )
+                    tecnico_persona = result.scalar_one_or_none()
+                    
+                    if tecnico_persona:
+                        await notification_service.notificar_tecnico_asignado(
+                            db=db,
+                            servicio=servicio,
+                            tecnico=tecnico_persona
+                        )
+        except Exception as e:
+            # Log error pero no fallar la operación principal
+            import logging
+            logging.getLogger(__name__).error(f"Error enviando notificación técnico asignado: {e}")
         
         # Obtener vehículos asignados
         vehiculos_asignados = await servicio_vehiculo_crud.get_by_servicio(db, servicio.id)
@@ -489,9 +515,33 @@ async def completar_servicio(
     """
     
     try:
+        # Completar el servicio (cambia estado y libera recursos)
         servicio = await servicio_service.completar_servicio(db, servicio_id, id_taller)
         
-        # Obtener técnicos y vehículos
+        # ============================================================================
+        # ENVIAR NOTIFICACIÓN PUSH AL CLIENTE
+        # ============================================================================
+        # Notificar al cliente que su servicio ha sido finalizado exitosamente
+        # Esto permite que el cliente sepa que puede valorar el servicio
+        from app.services.notification_service import notification_service
+        
+        try:
+            # Enviar notificación con fallback para que no falle si hay problemas con FCM
+            await notification_service.notificar_servicio_finalizado(
+                db=db,
+                servicio=servicio
+            )
+        except Exception as notif_error:
+            # Si falla la notificación, solo registrar el error
+            # El servicio ya fue completado exitosamente
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"No se pudo enviar notificación de finalización al cliente "
+                f"para servicio {servicio.id}: {notif_error}"
+            )
+        
+        # Obtener técnicos y vehículos para la respuesta
         tecnicos_asignados = await servicio_tecnico_crud.get_by_servicio(db, servicio.id)
         tecnicos_response = []
         for asignacion in tecnicos_asignados:

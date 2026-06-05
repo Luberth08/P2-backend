@@ -141,6 +141,7 @@ async def solicitar_servicio_taller(
     (elegido por el conductor)
     """
     try:
+        # Crear la solicitud de servicio en la base de datos
         solicitud = await solicitud_servicio_service.crear_solicitud_servicio_manual(
             db=db,
             id_diagnostico=diagnostico_id,
@@ -149,7 +150,7 @@ async def solicitar_servicio_taller(
             comentario=comentario
         )
         
-        # Convertir ubicacion a string
+        # Convertir ubicacion a string para la respuesta
         if solicitud.ubicacion:
             point = to_shape(solicitud.ubicacion)
             solicitud.ubicacion = f"{point.y},{point.x}"
@@ -217,10 +218,42 @@ async def cancelar_solicitud_servicio(
             detail="Solo se pueden cancelar solicitudes en estado pendiente"
         )
     
+    # Guardar el ID del taller antes de actualizar (lo necesitamos para la notificación)
+    id_taller = solicitud.id_taller
+    
+    # Actualizar el estado a cancelada
     await solicitud_servicio_crud.update_estado(
         db, solicitud_id, EstadoSolicitudServicio.cancelada
     )
     await db.commit()
+    
+    # ============================================================================
+    # ENVIAR NOTIFICACIÓN PUSH AL TALLER
+    # ============================================================================
+    # Notificar a todos los usuarios del taller que el cliente canceló la solicitud
+    # Esto les permite saber que ya no necesitan atender esta solicitud
+    from app.services.notification_service import notification_service
+    
+    try:
+        # Refrescar la solicitud para obtener el estado actualizado
+        await db.refresh(solicitud)
+        
+        # Enviar notificación con método de fallback
+        await notification_service.notificar_solicitud_cancelada_taller(
+            db=db,
+            solicitud=solicitud,
+            id_taller=id_taller,
+            motivo_cancelacion="El cliente canceló la solicitud"
+        )
+    except Exception as notif_error:
+        # Si falla la notificación, solo registrar el error
+        # La cancelación ya fue exitosa, la notificación es secundaria
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"No se pudo enviar notificación de cancelación al taller {id_taller} "
+            f"para solicitud {solicitud_id}: {notif_error}"
+        )
     
     return None
 

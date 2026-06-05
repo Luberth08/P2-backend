@@ -21,3 +21,4 @@ requests>=2.31.0 # Para APIs externas
 # Firebase Cloud Messaging
 google-auth>=2.23.0  # Para FCM API v1
 httpx>=0.25.0  # Cliente HTTP asíncrono
+pywebpush>=1.14.0  # Para Web Push notifications

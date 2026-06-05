@@ -73,8 +73,11 @@ async def list_mis_talleres(
     limit: int = 10
 ) -> Tuple[List[TallerResponse], int]:
     talleres, total = await crud_taller.get_by_usuario_admin(db, id_usuario, skip, limit)
+    # Filtrar solo talleres activos
+    talleres_activos = [t for t in talleres if t.estado == EstadoTaller.activo]
+    total_activos = len(talleres_activos)
     responses = []
-    for t in talleres:
+    for t in talleres_activos:
         responses.append(TallerResponse(
             id=t.id,
             nombre=t.nombre,
@@ -83,7 +86,7 @@ async def list_mis_talleres(
             ubicacion=_format_ubicacion(t.ubicacion),
             estado=t.estado
         ))
-    return responses, total
+    return responses, total_activos
 
 
 async def get_taller_detail(

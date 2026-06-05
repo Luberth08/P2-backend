@@ -538,79 +538,118 @@ class NotificationService:
         datos_extra: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
-        Envía notificación push a una lista de tokens FCM usando API v1
+        Envía notificación push usando FCM o Web Push según el tipo de token
         """
-        if not self.fcm_credentials_path or not self.project_id:
-            logger.warning("FCM no configurado correctamente (falta credentials o project_id)")
-            return False
-        
         if not tokens:
-            logger.info("No hay tokens FCM para enviar notificación")
+            logger.info("No hay tokens para enviar notificación")
             return True
         
-        # Obtener access token
-        access_token = self._get_access_token()
-        if not access_token:
-            logger.error("No se pudo obtener access token de FCM")
-            return False
+        # Separar tokens FCM de tokens Web Push
+        tokens_fcm = []
+        tokens_web_push = []
+        
+        for token in tokens:
+            # Los tokens Web Push son JSON que empiezan con "{"
+            if token.strip().startswith('{'):
+                try:
+                    import json
+                    subscription = json.loads(token)
+                    tokens_web_push.append(subscription)
+                except json.JSONDecodeError:
+                    # Si no es JSON válido, tratar como FCM
+                    tokens_fcm.append(token)
+            else:
+                tokens_fcm.append(token)
         
         success_count = 0
         failure_count = 0
         
-        # FCM v1 requiere enviar un mensaje por token
-        for token in tokens:
+        # Enviar notificaciones Web Push
+        if tokens_web_push:
             try:
-                # Preparar payload FCM v1
-                payload = {
-                    "message": {
-                        "token": token,
-                        "notification": {
-                            "title": titulo,
-                            "body": mensaje
-                        },
-                        "data": {str(k): str(v) for k, v in (datos_extra or {}).items()},
-                        "android": {
-                            "priority": "high",
-                            "notification": {
-                                "sound": "default",
-                                "channel_id": "default"
-                            }
-                        }
-                    }
-                }
-                
-                headers = {
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json"
-                }
-                
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.post(
-                        self.fcm_url,
-                        json=payload,
-                        headers=headers
-                    )
-                    
-                    if response.status_code == 200:
-                        success_count += 1
-                        logger.info(f"Notificación enviada exitosamente a token: {token[:20]}...")
-                    else:
-                        failure_count += 1
-                        logger.error(f"Error FCM para token {token[:20]}...: {response.status_code} - {response.text}")
-                        
+                from app.services.web_push_service import web_push_service
+                logger.info(f"Enviando {len(tokens_web_push)} notificaciones Web Push...")
+                web_success = await web_push_service.enviar_notificacion_web_push(
+                    tokens_web_push,
+                    titulo,
+                    mensaje,
+                    datos_extra
+                )
+                if web_success:
+                    success_count += len(tokens_web_push)
+                    logger.info(f"✅ Web Push: {len(tokens_web_push)} notificaciones enviadas")
+                else:
+                    failure_count += len(tokens_web_push)
+                    logger.error(f"❌ Web Push: Falló el envío")
             except Exception as e:
-                failure_count += 1
-                logger.error(f"Error enviando notificación a token {token[:20]}...: {e}")
+                failure_count += len(tokens_web_push)
+                logger.error(f"Error enviando Web Push: {e}")
+        
+        # Enviar notificaciones FCM
+        if tokens_fcm:
+            if not self.fcm_credentials_path or not self.project_id:
+                logger.warning("FCM no configurado correctamente (falta credentials o project_id)")
+                failure_count += len(tokens_fcm)
+            else:
+                access_token = self._get_access_token()
+                if not access_token:
+                    logger.error("No se pudo obtener access token de FCM")
+                    failure_count += len(tokens_fcm)
+                else:
+                    logger.info(f"Enviando {len(tokens_fcm)} notificaciones FCM...")
+                    for token in tokens_fcm:
+                        try:
+                            # Preparar payload FCM v1
+                            payload = {
+                                "message": {
+                                    "token": token,
+                                    "notification": {
+                                        "title": titulo,
+                                        "body": mensaje
+                                    },
+                                    "data": {str(k): str(v) for k, v in (datos_extra or {}).items()},
+                                    "android": {
+                                        "priority": "high",
+                                        "notification": {
+                                            "sound": "default",
+                                            "channel_id": "default"
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            headers = {
+                                "Authorization": f"Bearer {access_token}",
+                                "Content-Type": "application/json"
+                            }
+                            
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                response = await client.post(
+                                    self.fcm_url,
+                                    json=payload,
+                                    headers=headers
+                                )
+                            
+                            if response.status_code == 200:
+                                success_count += 1
+                                logger.info(f"Notificación FCM enviada exitosamente a token: {token[:20]}...")
+                            else:
+                                failure_count += 1
+                                logger.error(f"Error FCM para token {token[:20]}...: {response.status_code} - {response.text}")
+                                
+                        except Exception as e:
+                            failure_count += 1
+                            logger.error(f"Error enviando notificación FCM a token {token[:20]}...: {e}")
         
         logger.info(f"Notificaciones enviadas: {success_count} éxitos, {failure_count} fallos")
         return success_count > 0
     
     async def obtener_tokens_persona(self, db: AsyncSession, id_persona: int) -> List[str]:
         """
-        Obtiene todos los tokens FCM de una persona
+        Obtiene todos los tokens FCM activos de una persona
         """
         dispositivos = await crud_dispositivo_usuario.dispositivo_usuario.get_by_persona(db, id_persona)
-        return [d.token_fcm for d in dispositivos if d.token_fcm]
+        return [d.token_fcm for d in dispositivos if d.token_fcm and d.activo]
     
     async def notificar_solicitud_aceptada(
         self,
@@ -869,6 +908,8 @@ class NotificationService:
             True si al menos una notificación fue enviada exitosamente
         """
         try:
+            logger.info(f"🔔 Iniciando notificación de nueva solicitud al taller {id_taller}")
+            
             # Obtener información del diagnóstico y cliente
             result = await db.execute(
                 select(Diagnostico, SolicitudDiagnostico, Persona).join(
@@ -882,21 +923,44 @@ class NotificationService:
             
             row = result.first()
             if not row:
-                logger.warning(f"No se encontró información del diagnóstico para solicitud {solicitud.id}")
+                logger.warning(f"❌ No se encontró información del diagnóstico para solicitud {solicitud.id}")
                 return False
             
             diagnostico, solicitud_diag, persona = row
+            logger.info(f"✅ Datos obtenidos: Cliente={persona.nombre}, Solicitud={solicitud.id}")
+            
+            # Obtener nombre del taller y verificar estado
+            from app.crud.crud_taller import taller as crud_taller
+            from app.models.taller import EstadoTaller
+            taller = await crud_taller.get(db, id_taller)
+            
+            if not taller:
+                logger.warning(f"❌ Taller {id_taller} no encontrado")
+                return False
+            
+            # Verificar si el taller está suspendido
+            if taller.estado == EstadoTaller.suspendido:
+                logger.info(f"⏭️ Taller {id_taller} ({taller.nombre}) está suspendido, no se envía notificación")
+                return True  # No es un error, simplemente no se envía
+            
+            nombre_taller = taller.nombre
             
             # Obtener tokens de todos los usuarios del taller
+            logger.info(f"🔍 Buscando tokens de usuarios del taller {id_taller}...")
             tokens = await self.obtener_tokens_usuarios_taller(db, id_taller)
             
+            logger.info(f"📱 Tokens encontrados: {len(tokens)}")
+            if tokens:
+                for i, token in enumerate(tokens):
+                    logger.info(f"  Token {i+1}: {token[:30]}...")
+            
             if not tokens:
-                logger.info(f"Taller {id_taller} no tiene usuarios con tokens FCM registrados")
+                logger.warning(f"⚠️ Taller {id_taller} no tiene usuarios con tokens FCM registrados")
                 return True  # No es un error, simplemente no hay dispositivos
             
             # Preparar notificación
-            titulo = "🚗 Nueva Solicitud de Servicio"
-            mensaje = f"Nueva solicitud de {persona.nombre or 'un cliente'}. Ubicación: {solicitud_diag.ubicacion or 'No especificada'}"
+            titulo = f"🚗 Nueva Solicitud - {nombre_taller}"
+            mensaje = f"Tienes una nueva solicitud de {persona.nombre or 'un cliente'}. Ubicación: {solicitud_diag.ubicacion or 'No especificada'}"
             
             # Datos adicionales para la notificación
             datos_extra = {
@@ -907,11 +971,22 @@ class NotificationService:
                 "accion": "abrir_solicitud_detalle"
             }
             
+            logger.info(f"📤 Enviando notificación: '{titulo}' a {len(tokens)} dispositivo(s)")
+            
             # Enviar notificación a todos los usuarios del taller
-            return await self.enviar_notificacion_push(tokens, titulo, mensaje, datos_extra)
+            result = await self.enviar_notificacion_push(tokens, titulo, mensaje, datos_extra)
+            
+            if result:
+                logger.info(f"✅ Notificación enviada exitosamente al taller {id_taller}")
+            else:
+                logger.error(f"❌ Falló el envío de notificación al taller {id_taller}")
+            
+            return result
             
         except Exception as e:
-            logger.error(f"Error notificando nueva solicitud al taller {id_taller}: {e}")
+            logger.error(f"💥 Error notificando nueva solicitud al taller {id_taller}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     async def notificar_solicitud_cancelada_taller(

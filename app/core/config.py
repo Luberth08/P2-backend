@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Firebase Cloud Messaging (API v1)
     FCM_CREDENTIALS_PATH: str | None = None  # Ruta al archivo JSON de credenciales
     FIREBASE_PROJECT_ID: str | None = None   # ID del proyecto Firebase
+    
+    # Web Push (VAPID)
+    FCM_VAPID_KEY: str | None = None         # Clave pública VAPID para frontend
+    VAPID_PRIVATE_KEY: str | None = None     # Clave privada VAPID para backend
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

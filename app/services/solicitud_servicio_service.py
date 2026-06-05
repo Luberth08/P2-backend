@@ -240,6 +240,9 @@ async def crear_solicitudes_servicio_automaticas(
     solicitudes_creadas = 0
     talleres_sugeridos = []
     
+    # Importar el servicio de notificaciones
+    from app.services.notification_service import notification_service
+    
     for taller_info in talleres_validos:
         taller = taller_info['taller']
         
@@ -258,8 +261,28 @@ async def crear_solicitudes_servicio_automaticas(
                 'distancia_km': taller_info['distancia_km']
             }
             
-            await solicitud_servicio_crud.create(db, solicitud_data)
+            solicitud = await solicitud_servicio_crud.create(db, solicitud_data)
             solicitudes_creadas += 1
+            
+            # ============================================================================
+            # ENVIAR NOTIFICACIÓN PUSH AL TALLER
+            # ============================================================================
+            # Notificar a todos los usuarios del taller sobre la nueva solicitud
+            # Se hace de forma asíncrona y con manejo de errores para que un fallo
+            # en las notificaciones no impida la creación de solicitudes
+            try:
+                await notification_service.notificar_nueva_solicitud_taller(
+                    db=db,
+                    solicitud=solicitud,
+                    id_taller=taller.id
+                )
+                logger.info(f"✅ Notificación enviada al taller {taller.id} para solicitud {solicitud.id}")
+            except Exception as notif_error:
+                # Registrar error pero continuar con el proceso
+                logger.warning(
+                    f"⚠️ No se pudo enviar notificación al taller {taller.id} "
+                    f"para solicitud {solicitud.id}: {notif_error}"
+                )
         
         talleres_sugeridos.append({
             'id': taller.id,
@@ -315,9 +338,8 @@ async def crear_solicitud_servicio_manual(
     # Calcular distancia entre cliente y taller
     distancia_km = None
     if solicitud_diag.ubicacion and taller.ubicacion:
-        from geoalchemy2 import func as geo_func
         result = await db.execute(
-            select(geo_func.ST_Distance(solicitud_diag.ubicacion, taller.ubicacion))
+            select(ST_Distance(solicitud_diag.ubicacion, taller.ubicacion))
         )
         distancia = result.scalar()
         if distancia:
@@ -335,5 +357,24 @@ async def crear_solicitud_servicio_manual(
     
     solicitud = await solicitud_servicio_crud.create(db, solicitud_data)
     await db.commit()
+    
+    # ============================================================================
+    # ENVIAR NOTIFICACIÓN PUSH AL TALLER
+    # ============================================================================
+    # Notificar al taller sobre la nueva solicitud manual
+    from app.services.notification_service import notification_service
+    try:
+        await notification_service.notificar_nueva_solicitud_taller(
+            db=db,
+            solicitud=solicitud,
+            id_taller=id_taller
+        )
+        logger.info(f"✅ Notificación enviada al taller {id_taller} para solicitud manual {solicitud.id}")
+    except Exception as notif_error:
+        # Registrar error pero no fallar la operación principal
+        logger.warning(
+            f"⚠️ No se pudo enviar notificación al taller {id_taller} "
+            f"para solicitud manual {solicitud.id}: {notif_error}"
+        )
     
     return solicitud

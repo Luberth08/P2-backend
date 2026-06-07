@@ -4,7 +4,7 @@ from app.db.session import get_db
 from app.core.deps import get_current_usuario
 from app.models.usuario import Usuario
 from app.services import taller_service
-from app.schemas.taller import TallerResponse, TallerDetailResponse, TallerUpdate
+from app.schemas.taller import TallerResponse, TallerDetailResponse, TallerUpdate, TallerAdminDetailResponse
 from app.crud.crud_rol import rol as crud_rol
 from app.crud.crud_rol_usuario import rol_usuario as crud_rol_usuario
 from app.core.constants import ROL_ADMIN_SISTEMA
@@ -109,3 +109,20 @@ async def activar_taller_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso restringido")
 
     return await taller_service.activar_taller(db, taller_id)
+
+
+@router.get("/{taller_id}/admin-detail", response_model=TallerAdminDetailResponse)
+async def get_taller_admin_detail(
+    taller_id: int,
+    current_usuario: Usuario = Depends(get_current_usuario),
+    db: AsyncSession = Depends(get_db)
+):
+    """Obtiene detalles completos del taller para admin sistema (incluyendo estadísticas)"""
+    rol_rec = await crud_rol.get_by_nombre(db, ROL_ADMIN_SISTEMA)
+    if not rol_rec:
+        raise HTTPException(status_code=500, detail=f"Rol '{ROL_ADMIN_SISTEMA}' no encontrado")
+    has = await crud_rol_usuario.user_has_rol(db, current_usuario.id, rol_rec.id)
+    if not has:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso restringido")
+
+    return await taller_service.get_taller_admin_detail(db, taller_id)

@@ -283,10 +283,10 @@ async def mis_cotizaciones(
                 "modelo": item.vehiculo.modelo
             } if item.vehiculo else None,
             "servicio": {
-                "id": item.servicio.id,
-                "nombre": item.servicio.nombre,
-                "descripcion": item.servicio.descripcion
-            } if item.servicio else None,
+                "id": item.tipo_servicio.id,
+                "nombre": item.tipo_servicio.nombre,
+                "descripcion": item.tipo_servicio.descripcion
+            } if item.tipo_servicio else None,
             "responses": responses_data,
             "fotos": item.fotos
         })
@@ -471,7 +471,7 @@ async def taller_solicitudes_pendientes(
         from app.services.quote_service import quote_service as qs
         ubicacion_str = qs.format_ubicacion(item.ubicacion)
         
-        await db.refresh(item, ["vehiculo", "servicio", "cliente", "responses"])
+        await db.refresh(item, ["vehiculo", "tipo_servicio", "cliente", "responses"])
         
         # Verificar si el taller ya respondió
         from app.crud.crud_quote_response import quote_response as qr_crud
@@ -518,10 +518,10 @@ async def taller_solicitudes_pendientes(
                 "modelo": item.vehiculo.modelo
             } if item.vehiculo else None,
             "servicio": {
-                "id": item.servicio.id,
-                "nombre": item.servicio.nombre,
-                "descripcion": item.servicio.descripcion
-            } if item.servicio else None,
+                "id": item.tipo_servicio.id,
+                "nombre": item.tipo_servicio.nombre,
+                "descripcion": item.tipo_servicio.descripcion
+            } if item.tipo_servicio else None,
             "cliente_nombre": item.cliente.nombre if item.cliente else None,
             "ya_respondio": ya_respondio,
             "mi_respuesta": mi_respuesta_data,

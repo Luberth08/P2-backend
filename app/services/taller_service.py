@@ -278,3 +278,85 @@ async def activar_taller(db: AsyncSession, id_taller: int) -> TallerResponse:
     updated = await crud_taller.update(db, obj, {"estado": EstadoTaller.activo})
     await db.commit()
     return TallerResponse(id=updated.id, nombre=updated.nombre, telefono=updated.telefono, email=updated.email, ubicacion=_format_ubicacion(updated.ubicacion), estado=updated.estado.value)
+
+
+async def get_taller_admin_detail(
+    db: AsyncSession,
+    id_taller: int
+) -> dict:
+    """
+    Obtiene detalles completos del taller para admin sistema.
+    Incluye información del taller, estadísticas, servicios recientes y empleados recientes.
+    """
+    from app.schemas.taller import TallerAdminDetailResponse, ServicioBasicoResponse, EmpleadoBasicoResponse
+    from app.crud.crud_servicio import servicio as crud_servicio
+    from app.crud.crud_empleado import empleado as crud_empleado
+    from app.models.servicio import EstadoServicio
+    from app.models.empleado import EstadoEmpleado
+    
+    # Obtener el taller
+    taller_obj = await crud_taller.get(db, id_taller)
+    if not taller_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Taller no encontrado"
+        )
+    
+    # Obtener servicios del taller
+    todos_servicios = await crud_servicio.get_by_taller(db, id_taller)
+    total_servicios = len(todos_servicios)
+    
+    # Contar servicios activos
+    servicios_activos = 0
+    for s in todos_servicios:
+        if s.estado in [EstadoServicio.creado, EstadoServicio.tecnico_asignado, 
+                        EstadoServicio.en_camino, EstadoServicio.en_lugar, 
+                        EstadoServicio.en_atencion]:
+            servicios_activos += 1
+    
+    # Obtener últimos 5 servicios
+    servicios_recientes = []
+    for s in todos_servicios[:5]:
+        servicios_recientes.append(ServicioBasicoResponse(
+            id=s.id,
+            fecha=s.fecha,
+            estado=s.estado.value if isinstance(s.estado, EstadoServicio) else str(s.estado)
+        ))
+    
+    # Obtener empleados del taller
+    empleados, total_empleados = await crud_empleado.get_by_taller(db, id_taller, skip=0, limit=1000)
+    
+    # Contar empleados activos
+    empleados_activos = 0
+    for e in empleados:
+        if e.estado in [EstadoEmpleado.disponible, EstadoEmpleado.en_servicio]:
+            empleados_activos += 1
+    
+    # Obtener últimos 5 empleados
+    empleados_recientes = []
+    for e in empleados[:5]:
+        empleados_recientes.append(EmpleadoBasicoResponse(
+            id=e.id,
+            nombre=e.usuario.nombre if e.usuario else "N/A",
+            estado=e.estado.value if isinstance(e.estado, EstadoEmpleado) else str(e.estado),
+            fecha_ingreso=e.fecha_ingreso
+        ))
+    
+    return TallerAdminDetailResponse(
+        id=taller_obj.id,
+        nombre=taller_obj.nombre,
+        telefono=taller_obj.telefono,
+        email=taller_obj.email,
+        ubicacion=_format_ubicacion(taller_obj.ubicacion),
+        hora_inicio=_format_time(taller_obj.hora_inicio),
+        hora_fin=_format_time(taller_obj.hora_fin),
+        url_web=taller_obj.url_web,
+        puntos=float(taller_obj.puntos) if taller_obj.puntos else 0.0,
+        estado=taller_obj.estado.value if isinstance(taller_obj.estado, EstadoTaller) else str(taller_obj.estado),
+        total_servicios=total_servicios,
+        servicios_activos=servicios_activos,
+        total_empleados=total_empleados,
+        empleados_activos=empleados_activos,
+        servicios_recientes=servicios_recientes,
+        empleados_recientes=empleados_recientes
+    )

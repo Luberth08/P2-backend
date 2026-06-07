@@ -11,4 +11,4 @@ class TipoServicio(Base):
     descripcion = Column(String(500), nullable=True)
 
     # Relaciones
-    quote_requests = relationship("QuoteRequest", back_populates="servicio")
+    # quote_requests = relationship("QuoteRequest", back_populates="servicio")  # Comentado para evitar error de inicialización circular

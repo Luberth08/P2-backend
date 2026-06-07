@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
-from datetime import time
+from typing import Optional, List
+from datetime import time, datetime
 
 
 class TallerResponse(BaseModel):
@@ -71,3 +71,52 @@ class TallerUpdate(BaseModel):
             if len(cleaned) < 7 or len(cleaned) > 15:
                 raise ValueError('Teléfono debe tener entre 7 y 15 dígitos')
         return v
+
+
+class ServicioBasicoResponse(BaseModel):
+    """Información básica de un servicio para admin sistema"""
+    id: int
+    fecha: datetime
+    estado: str
+    
+    class Config:
+        from_attributes = True
+
+
+class EmpleadoBasicoResponse(BaseModel):
+    """Información básica de un empleado para admin sistema"""
+    id: int
+    nombre: str
+    estado: str
+    fecha_ingreso: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class TallerAdminDetailResponse(BaseModel):
+    """Schema completo para admin sistema con estadísticas"""
+    # Información del taller
+    id: int
+    nombre: str
+    telefono: str
+    email: str
+    ubicacion: Optional[str] = None
+    hora_inicio: Optional[str] = None
+    hora_fin: Optional[str] = None
+    url_web: Optional[str] = None
+    puntos: float
+    estado: str
+    
+    # Estadísticas
+    total_servicios: int = 0
+    servicios_activos: int = 0
+    total_empleados: int = 0
+    empleados_activos: int = 0
+    
+    # Listas resumidas (últimos 5)
+    servicios_recientes: List[ServicioBasicoResponse] = []
+    empleados_recientes: List[EmpleadoBasicoResponse] = []
+    
+    class Config:
+        from_attributes = True

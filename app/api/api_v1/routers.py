@@ -21,7 +21,8 @@ from .endpoints import (
     cliente_servicios,
     notifications,
     sync,
-    quotes
+    quotes,
+    kpi
 )
 
 api_router = APIRouter()
@@ -47,3 +48,4 @@ api_router.include_router(cliente_servicios.router, tags=["Cliente - Seguimiento
 api_router.include_router(notifications.router, tags=["Notificaciones Push"])
 api_router.include_router(sync.router, tags=["Sincronización Offline"])
 api_router.include_router(quotes.router, prefix="/cotizaciones", tags=["Cotizaciones"])
+api_router.include_router(kpi.router, prefix="/kpi", tags=["KPIs - Dashboard"])

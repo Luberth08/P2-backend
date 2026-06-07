@@ -31,7 +31,7 @@ class QuoteRequest(Base):
 
     # Relaciones
     vehiculo = relationship("Vehiculo", backref="quote_requests")
-    servicio = relationship("TipoServicio", back_populates="quote_requests")
+    tipo_servicio = relationship("TipoServicio")  # Sin back_populates para evitar error de inicialización circular
     cliente = relationship("Usuario", backref="quote_requests")
     responses = relationship("QuoteResponse", back_populates="quote_request", cascade="all, delete-orphan")
 

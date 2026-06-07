@@ -48,6 +48,25 @@ async def get_current_usuario(
         raise HTTPException(status_code=403, detail="User account required")
     return usuario
 
+# Función para autenticar desde token raw (sin header Authorization)
+# Útil para WebSocket donde el token viene como query parameter
+async def get_current_persona_from_token(
+    token: str,
+    db: AsyncSession = Depends(get_db)
+) -> Persona:
+    """Autentica persona desde token raw (sin 'Bearer ' prefix)"""
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    # Buscar sesión activa
+    sesion = await crud_sesion.get_by_token(db, token)
+    if not sesion:
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+    persona = await crud_persona.get(db, sesion.id_persona)
+    if not persona:
+        raise HTTPException(status_code=401, detail="Persona not found")
+    return persona
+
 # ========== DEPENDENCIAS DE AUTORIZACIÓN (permisos) ==========
 
 # Dependencia para verificar si el usuario autenticado tiene el permiso especificado

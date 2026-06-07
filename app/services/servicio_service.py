@@ -24,6 +24,8 @@ from app.models.vehiculo_taller import VehiculoTaller, EstadoVehiculoTaller
 from app.models.usuario import Usuario
 from app.models.rol_usuario import RolUsuario
 from app.models.rol import Rol
+from app.models.diagnostico import Diagnostico
+from app.models.solicitud_diagnostico import SolicitudDiagnostico
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,89 @@ def normalize_datetime_timezone(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+async def obtener_user_id_cliente_desde_servicio(
+    db: AsyncSession,
+    servicio: Servicio
+) -> Optional[int]:
+    """
+    Obtiene el user_id (id_persona) del cliente desde un servicio.
+    Ruta: Servicio -> SolicitudServicio -> Diagnostico -> SolicitudDiagnostico -> id_persona
+    """
+    try:
+        if not servicio.solicitud_servicio:
+            return None
+        
+        solicitud_servicio = servicio.solicitud_servicio
+        
+        # Cargar el diagnóstico si no está cargado
+        if not hasattr(solicitud_servicio, 'diagnostico') or solicitud_servicio.diagnostico is None:
+            result = await db.execute(
+                select(Diagnostico).where(Diagnostico.id == solicitud_servicio.id_diagnostico)
+            )
+            diagnostico = result.scalar_one_or_none()
+        else:
+            diagnostico = solicitud_servicio.diagnostico
+        
+        if not diagnostico:
+            return None
+        
+        # Cargar la solicitud de diagnóstico si no está cargada
+        if not hasattr(diagnostico, 'solicitud') or diagnostico.solicitud is None:
+            result = await db.execute(
+                select(SolicitudDiagnostico).where(SolicitudDiagnostico.id == diagnostico.id_solicitud_diagnostico)
+            )
+            solicitud_diag = result.scalar_one_or_none()
+        else:
+            solicitud_diag = diagnostico.solicitud
+        
+        if not solicitud_diag:
+            return None
+        
+        return solicitud_diag.id_persona
+    except Exception as e:
+        logger.error(f"Error obteniendo user_id del cliente: {e}")
+        return None
+
+
+async def obtener_user_id_cliente_desde_solicitud(
+    db: AsyncSession,
+    solicitud: SolicitudServicio
+) -> Optional[int]:
+    """
+    Obtiene el user_id (id_persona) del cliente desde una solicitud de servicio.
+    Ruta: SolicitudServicio -> Diagnostico -> SolicitudDiagnostico -> id_persona
+    """
+    try:
+        # Cargar el diagnóstico si no está cargado
+        if not hasattr(solicitud, 'diagnostico') or solicitud.diagnostico is None:
+            result = await db.execute(
+                select(Diagnostico).where(Diagnostico.id == solicitud.id_diagnostico)
+            )
+            diagnostico = result.scalar_one_or_none()
+        else:
+            diagnostico = solicitud.diagnostico
+        
+        if not diagnostico:
+            return None
+        
+        # Cargar la solicitud de diagnóstico si no está cargada
+        if not hasattr(diagnostico, 'solicitud') or diagnostico.solicitud is None:
+            result = await db.execute(
+                select(SolicitudDiagnostico).where(SolicitudDiagnostico.id == diagnostico.id_solicitud_diagnostico)
+            )
+            solicitud_diag = result.scalar_one_or_none()
+        else:
+            solicitud_diag = diagnostico.solicitud
+        
+        if not solicitud_diag:
+            return None
+        
+        return solicitud_diag.id_persona
+    except Exception as e:
+        logger.error(f"Error obteniendo user_id del cliente desde solicitud: {e}")
+        return None
 
 
 async def obtener_solicitudes_recientes(
@@ -296,6 +381,25 @@ async def aceptar_solicitud_servicio(
     await db.commit()
     await db.refresh(servicio)
     
+    # Emitir evento WebSocket (fire and forget, no bloquear si falla)
+    try:
+        from app.services.websocket_service import get_event_emitter
+        event_emitter = get_event_emitter()
+        
+        # Obtener user_id del cliente
+        user_id_cliente = await obtener_user_id_cliente_desde_solicitud(db, solicitud)
+        
+        # Emitir evento de solicitud aceptada
+        await event_emitter.emit_solicitud_aceptada(
+            solicitud_id=id_solicitud,
+            servicio_id=servicio.id,
+            id_taller=id_taller,
+            user_id_cliente=user_id_cliente
+        )
+    except Exception as e:
+        # Log error pero no fallar la operación principal
+        logger.error(f"Error emitiendo evento WebSocket solicitud_aceptada: {e}")
+    
     return servicio
 
 
@@ -325,6 +429,24 @@ async def rechazar_solicitud_servicio(
     
     await db.commit()
     await db.refresh(solicitud)
+    
+    # Emitir evento WebSocket (fire and forget, no bloquear si falla)
+    try:
+        from app.services.websocket_service import get_event_emitter
+        event_emitter = get_event_emitter()
+        
+        # Obtener user_id del cliente
+        user_id_cliente = await obtener_user_id_cliente_desde_solicitud(db, solicitud)
+        
+        # Emitir evento de solicitud rechazada
+        await event_emitter.emit_solicitud_rechazada(
+            solicitud_id=id_solicitud,
+            id_taller=id_taller,
+            user_id_cliente=user_id_cliente
+        )
+    except Exception as e:
+        # Log error pero no fallar la operación principal
+        logger.error(f"Error emitiendo evento WebSocket solicitud_rechazada: {e}")
     
     return solicitud
 
@@ -368,6 +490,24 @@ async def completar_servicio(
     
     await db.commit()
     await db.refresh(servicio)
+    
+    # Emitir evento WebSocket de servicio finalizado (fire and forget, no bloquear si falla)
+    try:
+        from app.services.websocket_service import get_event_emitter
+        event_emitter = get_event_emitter()
+        
+        # Obtener user_id del cliente
+        user_id_cliente = await obtener_user_id_cliente_desde_servicio(db, servicio)
+        
+        # Emitir evento de servicio finalizado
+        if user_id_cliente:
+            await event_emitter.emit_servicio_finalizado(
+                servicio_id=id_servicio,
+                user_id_cliente=user_id_cliente
+            )
+    except Exception as e:
+        # Log error pero no fallar la operación principal
+        logger.error(f"Error emitiendo evento WebSocket servicio_finalizado: {e}")
     
     return servicio
 
@@ -513,6 +653,9 @@ async def actualizar_estado_servicio(
     if not servicio:
         raise ValueError("Servicio no encontrado")
     
+    # Guardar estado anterior para emitir evento
+    estado_anterior = servicio.estado.value if servicio.estado else None
+    
     # Actualizar el estado
     servicio.estado = nuevo_estado
     
@@ -524,5 +667,24 @@ async def actualizar_estado_servicio(
         await calcular_y_guardar_metricas(db, id_servicio)
     
     await db.flush()
+    
+    # Emitir evento WebSocket (fire and forget, no bloquear si falla)
+    try:
+        from app.services.websocket_service import get_event_emitter
+        event_emitter = get_event_emitter()
+        
+        # Obtener user_id del cliente
+        user_id_cliente = await obtener_user_id_cliente_desde_servicio(db, servicio)
+        
+        # Emitir evento de cambio de estado
+        await event_emitter.emit_servicio_estado_cambiado(
+            servicio_id=id_servicio,
+            estado_anterior=estado_anterior,
+            estado_nuevo=nuevo_estado.value,
+            user_id_cliente=user_id_cliente
+        )
+    except Exception as e:
+        # Log error pero no fallar la operación principal
+        logger.error(f"Error emitiendo evento WebSocket: {e}")
     
     return servicio

@@ -233,6 +233,32 @@ class WebSocketEventEmitter:
         await self.connection_manager.send_to_service_room(servicio_id, event)
         
         logger.info(f"Evento emitido: servicio_finalizado para servicio {servicio_id}")
+    
+    async def emit_solicitud_creada(
+        self,
+        solicitud_id: int,
+        id_taller: int,
+        id_diagnostico: int,
+        distancia_km: Optional[float] = None
+    ):
+        """Emite evento cuando se crea una nueva solicitud de servicio"""
+        event = {
+            "type": "solicitud_creada",
+            "data": {
+                "solicitud_id": solicitud_id,
+                "id_taller": id_taller,
+                "id_diagnostico": id_diagnostico,
+                "distancia_km": distancia_km,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        }
+        
+        # Enviar a todos los usuarios del taller
+        # Necesitamos obtener los user_ids de los usuarios del taller
+        # Por ahora, enviamos broadcast y el frontend filtrará
+        await self.connection_manager.broadcast(event)
+        
+        logger.info(f"Evento emitido: solicitud_creada para solicitud {solicitud_id}, taller {id_taller}")
 
 
 # Instancias globales

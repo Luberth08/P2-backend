@@ -265,6 +265,22 @@ async def crear_solicitudes_servicio_automaticas(
             solicitudes_creadas += 1
             
             # ============================================================================
+            # EMITIR EVENTO WEBSOCKET: SOLICITUD CREADA
+            # ============================================================================
+            from app.services.websocket_service import get_event_emitter
+            event_emitter = get_event_emitter()
+            try:
+                await event_emitter.emit_solicitud_creada(
+                    solicitud_id=solicitud.id,
+                    id_taller=taller.id,
+                    id_diagnostico=id_diagnostico,
+                    distancia_km=taller_info['distancia_km']
+                )
+                logger.info(f"✅ Evento WebSocket emitido: solicitud_creada para solicitud {solicitud.id}")
+            except Exception as ws_error:
+                logger.warning(f"⚠️ No se pudo emitir evento WebSocket para solicitud {solicitud.id}: {ws_error}")
+            
+            # ============================================================================
             # ENVIAR NOTIFICACIÓN PUSH AL TALLER
             # ============================================================================
             # Notificar a todos los usuarios del taller sobre la nueva solicitud
@@ -357,6 +373,22 @@ async def crear_solicitud_servicio_manual(
     
     solicitud = await solicitud_servicio_crud.create(db, solicitud_data)
     await db.commit()
+    
+    # ============================================================================
+    # EMITIR EVENTO WEBSOCKET: SOLICITUD CREADA
+    # ============================================================================
+    from app.services.websocket_service import get_event_emitter
+    event_emitter = get_event_emitter()
+    try:
+        await event_emitter.emit_solicitud_creada(
+            solicitud_id=solicitud.id,
+            id_taller=id_taller,
+            id_diagnostico=id_diagnostico,
+            distancia_km=distancia_km
+        )
+        logger.info(f"✅ Evento WebSocket emitido: solicitud_creada para solicitud manual {solicitud.id}")
+    except Exception as ws_error:
+        logger.warning(f"⚠️ No se pudo emitir evento WebSocket para solicitud manual {solicitud.id}: {ws_error}")
     
     # ============================================================================
     # ENVIAR NOTIFICACIÓN PUSH AL TALLER

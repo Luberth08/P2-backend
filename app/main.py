@@ -18,6 +18,9 @@ app.add_middleware(
 
 # Incluir routers
 app.mount("/static", StaticFiles(directory="static"), name="static")
+# Montar directorio de uploads para servir archivos de fotos
+if os.path.exists("uploads"):
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")

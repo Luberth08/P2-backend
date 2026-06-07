@@ -21,3 +21,6 @@ from app.crud.crud_servicio import servicio
 from app.crud.crud_servicio_tecnico import servicio_tecnico
 from app.crud.crud_servicio_vehiculo import servicio_vehiculo
 from app.crud.crud_empleado import empleado
+from app.crud.crud_quote_request import quote_request
+from app.crud.crud_quote_response import quote_response
+from app.crud.crud_quote_item import quote_item

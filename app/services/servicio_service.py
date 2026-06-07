@@ -504,6 +504,7 @@ async def actualizar_estado_servicio(
 ) -> Servicio:
     """
     Actualiza el estado de un servicio y registra el cambio en el historial.
+    Si el nuevo estado es 'finalizado' o 'cancelado', libera los recursos (técnicos y vehículos).
     Si el nuevo estado es 'finalizado', también calcula y guarda las métricas.
     
     Esta es la función principal que debe usarse para cambiar estados.
@@ -518,6 +519,29 @@ async def actualizar_estado_servicio(
     
     # Registrar en historial
     await registrar_cambio_estado(db, id_servicio, nuevo_estado)
+    
+    # Si se finalizó o canceló, liberar recursos (técnicos y vehículos)
+    if nuevo_estado in [EstadoServicio.finalizado, EstadoServicio.cancelado]:
+        logger.info(f"Liberando recursos del servicio {id_servicio} (estado: {nuevo_estado.value})")
+        
+        # Liberar técnicos
+        tecnicos_asignados = await servicio_tecnico_crud.get_by_servicio(db, id_servicio)
+        for asignacion in tecnicos_asignados:
+            empleado = await empleado_crud.get(db, asignacion.id_empleado)
+            if empleado and empleado.estado == EstadoEmpleado.en_servicio:
+                empleado.estado = EstadoEmpleado.disponible
+                logger.info(f"Técnico {empleado.id} liberado (estado: disponible)")
+        
+        # Liberar vehículos
+        vehiculos_asignados = await servicio_vehiculo_crud.get_by_servicio(db, id_servicio)
+        for asignacion in vehiculos_asignados:
+            result = await db.execute(
+                select(VehiculoTaller).where(VehiculoTaller.id == asignacion.id_vehiculo_taller)
+            )
+            vehiculo = result.scalar_one_or_none()
+            if vehiculo and vehiculo.estado == EstadoVehiculoTaller.en_servicio:
+                vehiculo.estado = EstadoVehiculoTaller.disponible
+                logger.info(f"Vehículo {vehiculo.id} liberado (estado: disponible)")
     
     # Si se finalizó, calcular métricas
     if nuevo_estado == EstadoServicio.finalizado:

@@ -1,0 +1,91 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║     SOLUCIÓN RÁPIDA: Can't locate 'merge_heads_notifications'       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+PROBLEMA: Referencia huérfana en tabla alembic_version
+
+SOLUCIÓN: Limpiar y reaplicar migraciones
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 OPCIÓN 1: Con Script Python (MÁS FÁCIL)
+
+cd "C:\Users\Luberth\Documentos\Avance Academico\7mo Semestre\Sistemas de Informacion II\PRIMER PARCIAL\SOFTWARE\BACKEND-repo"
+
+.venv\Scripts\activate
+
+python fix_alembic_version.py
+
+alembic upgrade head
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 OPCIÓN 2: Con SQL Directo (SI OPCIÓN 1 FALLA)
+
+# Paso 1: Conectar a tu base de datos PostgreSQL
+psql -h localhost -U postgres -d nombre_de_tu_bd
+
+# Paso 2: Limpiar la tabla (EN PSQL)
+DELETE FROM alembic_version;
+
+# Paso 3: Salir de psql
+\q
+
+# Paso 4: Aplicar migraciones
+cd "C:\Users\Luberth\Documentos\Avance Academico\7mo Semestre\Sistemas de Informacion II\PRIMER PARCIAL\SOFTWARE\BACKEND-repo"
+.venv\Scripts\activate
+alembic upgrade head
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 OPCIÓN 3: Stampar sin ejecutar (SI YA TIENES LAS TABLAS)
+
+# Si tu BD ya tiene todas las tablas creadas pero alembic está perdido:
+
+cd "C:\Users\Luberth\Documentos\Avance Academico\7mo Semestre\Sistemas de Informacion II\PRIMER PARCIAL\SOFTWARE\BACKEND-repo"
+
+.venv\Scripts\activate
+
+# Limpiar referencia huérfana
+python fix_alembic_version.py
+
+# Marcar como aplicada la última migración SIN ejecutarla
+alembic stamp merge_heads_final
+
+# Verificar
+alembic current
+
+═══════════════════════════════════════════════════════════════════════
+
+✅ VERIFICAR QUE FUNCIONÓ
+
+alembic current
+# Debe mostrar: merge_heads_final (head)
+
+alembic heads
+# Debe mostrar solo una cabeza
+
+═══════════════════════════════════════════════════════════════════════
+
+⚠️ NOTAS IMPORTANTES
+
+1. La OPCIÓN 1 es la más segura (usa el script Python)
+2. Si ya tienes las tablas creadas, usa OPCIÓN 3 (stamp)
+3. NO perderás datos en tus tablas
+4. Solo se limpia el registro de migraciones
+
+═══════════════════════════════════════════════════════════════════════
+
+🔍 ¿QUÉ NOMBRE TIENE TU BASE DE DATOS?
+
+Mira en tu archivo .env:
+DATABASE_URL=postgresql+asyncpg://usuario:password@localhost/nombre_bd
+                                                              ^^^^^^^^^^^
+
+Usa ese nombre en los comandos SQL
+
+═══════════════════════════════════════════════════════════════════════
+
+📖 Para más detalles, lee: SOLUCION_MERGE_HEADS_NOTIFICATIONS.md
+
+═══════════════════════════════════════════════════════════════════════

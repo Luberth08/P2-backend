@@ -1,0 +1,165 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║          SOLUCIÓN FINAL: Stampar + Actualizar ENUM                  ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Tu BD ya tiene las tablas, solo falta:
+1. Marcar las migraciones como aplicadas (stamp)
+2. Actualizar el enum estadoservicio
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 1: STAMPAR (Marcar migraciones como aplicadas)
+
+cd "C:\Users\Luberth\Documentos\Avance Academico\7mo Semestre\Sistemas de Informacion II\PRIMER PARCIAL\SOFTWARE\BACKEND-repo"
+
+.venv\Scripts\activate
+
+alembic stamp merge_heads_final
+
+alembic current
+# Debe mostrar: merge_heads_final (head)
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 2: ACTUALIZAR ENUM (Ejecutar SQL manualmente)
+
+# Conectar a tu base de datos
+psql -h localhost -U postgres -d nombre_de_tu_bd
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 3: COPIAR Y PEGAR ESTE SQL EN PSQL (VERSIÓN CORRECTA)
+
+-- IMPORTANTE: Ejecuta TODO este bloque completo
+
+-- 1. Crear nuevo ENUM
+CREATE TYPE estadoservicio_new AS ENUM (
+    'creado',
+    'tecnico_asignado',
+    'en_camino',
+    'en_lugar',
+    'en_atencion',
+    'finalizado',
+    'cancelado'
+);
+
+-- 2. Quitar DEFAULT de servicio
+ALTER TABLE servicio 
+ALTER COLUMN estado DROP DEFAULT;
+
+-- 3. Actualizar tipo en servicio
+ALTER TABLE servicio 
+ALTER COLUMN estado TYPE estadoservicio_new 
+USING (
+    CASE estado::text
+        WHEN 'en_proceso' THEN 'en_atencion'::estadoservicio_new
+        WHEN 'completado' THEN 'finalizado'::estadoservicio_new
+        ELSE estado::text::estadoservicio_new
+    END
+);
+
+-- 4. Restaurar DEFAULT
+ALTER TABLE servicio 
+ALTER COLUMN estado SET DEFAULT 'creado'::estadoservicio_new;
+
+-- 5. Actualizar historial_estados_servicio (si existe)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'historial_estados_servicio'
+    ) THEN
+        BEGIN
+            ALTER TABLE historial_estados_servicio 
+            ALTER COLUMN estado DROP DEFAULT;
+        EXCEPTION WHEN OTHERS THEN
+            NULL;
+        END;
+        
+        ALTER TABLE historial_estados_servicio 
+        ALTER COLUMN estado TYPE estadoservicio_new 
+        USING (
+            CASE estado::text
+                WHEN 'en_proceso' THEN 'en_atencion'::estadoservicio_new
+                WHEN 'completado' THEN 'finalizado'::estadoservicio_new
+                ELSE estado::text::estadoservicio_new
+            END
+        );
+    END IF;
+END $$;
+
+-- 6. Eliminar enum antiguo
+DROP TYPE estadoservicio;
+
+-- 7. Renombrar
+ALTER TYPE estadoservicio_new RENAME TO estadoservicio;
+
+-- 8. Verificar
+\dT+ estadoservicio
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 4: SALIR DE PSQL
+
+\q
+
+═══════════════════════════════════════════════════════════════════════
+
+✅ VERIFICAR QUE TODO FUNCIONÓ
+
+# 1. Verificar alembic
+alembic current
+# Debe mostrar: merge_heads_final (head)
+
+alembic heads
+# Debe mostrar: merge_heads_final (head)
+
+# 2. Iniciar el backend
+uvicorn app.main:app --reload
+
+# 3. Probar en el frontend
+# Intenta aceptar una solicitud de servicio
+# ✅ Debería funcionar sin errores!
+
+═══════════════════════════════════════════════════════════════════════
+
+🔍 ¿CÓMO SABER EL NOMBRE DE TU BASE DE DATOS?
+
+Mira tu archivo .env:
+DATABASE_URL=postgresql+asyncpg://usuario:password@localhost/NOMBRE_BD
+                                                              ^^^^^^^^^
+
+Usa ese nombre en el comando psql
+
+═══════════════════════════════════════════════════════════════════════
+
+⚠️ SI NO TIENES PSQL INSTALADO
+
+Opción 1 - Instalar psql:
+- Descarga PostgreSQL desde https://www.postgresql.org/download/
+
+Opción 2 - Usar pgAdmin:
+- Abre pgAdmin
+- Conéctate a tu servidor local
+- Abre Query Tool
+- Pega el SQL y ejecuta
+
+Opción 3 - Usar DBeaver u otra GUI:
+- Conéctate a tu BD
+- Abre SQL Editor
+- Pega el SQL y ejecuta
+
+═══════════════════════════════════════════════════════════════════════
+
+📖 Para más detalles, lee: SOLUCION_TABLAS_YA_EXISTEN.md
+
+═══════════════════════════════════════════════════════════════════════
+
+🎯 RESUMEN ULTRA RÁPIDO
+
+1. alembic stamp merge_heads_final
+2. psql y ejecutar SQL del enum
+3. uvicorn app.main:app --reload
+4. Probar en frontend
+
+═══════════════════════════════════════════════════════════════════════

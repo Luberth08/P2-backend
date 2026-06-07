@@ -1,0 +1,139 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║       COMANDOS PARA SOLUCIONAR ERROR DE ENUM EN RENDER              ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+PROBLEMA: invalid input value for enum estadoservicio: "tecnico_asignado"
+
+CAUSA: La BD en Render tiene valores antiguos del enum, el código usa nuevos
+
+SOLUCIÓN: Aplicar migración que actualiza el enum + merge de heads
+
+NOTA: Hay múltiples heads, pero se solucionará automáticamente con el merge
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 1: APLICAR MIGRACIONES EN LOCAL (PRIMERO)
+
+cd "C:\Users\Luberth\Documentos\Avance Academico\7mo Semestre\Sistemas de Informacion II\PRIMER PARCIAL\SOFTWARE\BACKEND-repo"
+
+.venv\Scripts\activate
+
+alembic upgrade head
+
+# Deberías ver algo como:
+# INFO  [alembic.runtime.migration] Running upgrade ... -> update_estadoservicio
+# INFO  [alembic.runtime.migration] Running upgrade ... -> merge_heads_final
+
+# Verificar que funcionó
+alembic current
+
+# Debería mostrar: merge_heads_final (head)
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 2: SUBIR LAS MIGRACIONES AL REPOSITORIO
+
+git add alembic/versions/update_estadoservicio_enum.py
+
+git add alembic/versions/merge_heads_final.py
+
+git add SOLUCION_ERROR_ENUM_RENDER.md
+
+git add SOLUCION_MULTIPLE_HEADS.md
+
+git add COMANDOS_ENUM_FIX.txt
+
+git commit -m "fix: Merge heads y actualizar enum estadoservicio"
+
+git push origin main
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 3: APLICAR MIGRACIÓN EN RENDER
+
+Opción A - Desde Render Shell (RECOMENDADO):
+
+1. Ve a tu dashboard de Render
+2. Abre tu servicio de Backend
+3. Click en "Shell" (arriba a la derecha)
+4. Ejecuta:
+
+   cd /opt/render/project/src
+   alembic upgrade head
+
+5. Espera a que termine
+6. La migración se aplicará en la BD de producción
+
+---
+
+Opción B - Conectarte desde local a Render:
+
+1. Obtén tu "External Database URL" de Render PostgreSQL
+2. Actualiza tu .env temporalmente:
+   DATABASE_URL=<la URL de Render>
+3. Ejecuta:
+   alembic upgrade head
+4. Restaura tu .env al valor local
+
+═══════════════════════════════════════════════════════════════════════
+
+📋 PASO 4: REDEPLOY (SI ES NECESARIO)
+
+Render debería hacer redeploy automático después del push.
+
+Si no lo hace:
+1. Ve a tu servicio en Render
+2. Click en "Manual Deploy" → "Deploy latest commit"
+
+═══════════════════════════════════════════════════════════════════════
+
+✅ VERIFICAR QUE FUNCIONÓ
+
+1. Espera a que termine el deploy (2-3 minutos)
+2. Ve al frontend
+3. Intenta aceptar una solicitud de servicio
+4. Debería funcionar sin errores ✨
+
+═══════════════════════════════════════════════════════════════════════
+
+📊 VALORES DEL ENUM
+
+ANTES (Antiguo):              DESPUÉS (Nuevo):
+- creado                      - creado
+- en_proceso                  - tecnico_asignado ⭐
+- completado                  - en_camino ⭐
+- cancelado                   - en_lugar ⭐
+                              - en_atencion ⭐
+                              - finalizado ⭐
+                              - cancelado
+
+La migración convierte automáticamente:
+  en_proceso → en_atencion
+  completado → finalizado
+
+═══════════════════════════════════════════════════════════════════════
+
+🔍 COMANDOS DE DIAGNÓSTICO
+
+Ver migración actual en BD:
+alembic current
+
+Ver cabeza de migraciones:
+alembic heads
+
+Ver historial:
+alembic history
+
+═══════════════════════════════════════════════════════════════════════
+
+⚠️ IMPORTANTE:
+
+1. APLICA PRIMERO EN LOCAL para probar
+2. DESPUÉS sube al repo y aplica en Render
+3. NO hagas deploy del código sin aplicar la migración en BD
+
+═══════════════════════════════════════════════════════════════════════
+
+📖 Para más detalles, lee: SOLUCION_ERROR_ENUM_RENDER.md
+
+═══════════════════════════════════════════════════════════════════════

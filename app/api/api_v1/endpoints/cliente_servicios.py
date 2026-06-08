@@ -537,3 +537,63 @@ async def obtener_estadisticas_taller(
         "total_valoraciones": total_valoraciones,
         "distribucion": distribucion
     }
+
+
+@router.post("/servicio/{servicio_id}/cancelar", status_code=status.HTTP_204_NO_CONTENT)
+async def cancelar_servicio_cliente(
+    servicio_id: int,
+    current_usuario: Usuario = Depends(get_current_usuario),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Cancela un servicio activo del cliente.
+    Libera técnicos y vehículos asignados.
+    Solo se pueden cancelar servicios en estados: creado, tecnico_asignado, en_camino, en_lugar, en_atencion
+    """
+    from app.services import servicio_service
+    
+    # Verificar que el servicio pertenece al cliente
+    result = await db.execute(
+        select(Servicio).join(
+            SolicitudServicio, Servicio.id_solicitud_servicio == SolicitudServicio.id
+        ).join(
+            Diagnostico, SolicitudServicio.id_diagnostico == Diagnostico.id
+        ).join(
+            SolicitudDiagnostico, Diagnostico.id_solicitud_diagnostico == SolicitudDiagnostico.id
+        ).where(
+            and_(
+                Servicio.id == servicio_id,
+                SolicitudDiagnostico.id_persona == current_usuario.id_persona
+            )
+        )
+    )
+    
+    servicio = result.scalar_one_or_none()
+    if not servicio:
+        raise HTTPException(status_code=404, detail="Servicio no encontrado")
+    
+    # Verificar que el servicio esté en un estado cancelable
+    estados_cancelables = [
+        EstadoServicio.creado,
+        EstadoServicio.tecnico_asignado,
+        EstadoServicio.en_camino,
+        EstadoServicio.en_lugar,
+        EstadoServicio.en_atencion
+    ]
+    
+    if servicio.estado not in estados_cancelables:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede cancelar un servicio en estado {servicio.estado.value}. Estados cancelables: {[e.value for e in estados_cancelables]}"
+        )
+    
+    # Cancelar el servicio usando el servicio existente que libera recursos
+    await servicio_service.actualizar_estado_servicio(
+        db=db,
+        id_servicio=servicio_id,
+        nuevo_estado=EstadoServicio.cancelado
+    )
+    
+    await db.commit()
+    
+    return None

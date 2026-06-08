@@ -3,6 +3,12 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from enum import Enum
 
+# Importar función para obtener hora de Bolivia
+def _now_bolivia():
+    """Importación lazy para evitar circular imports"""
+    from app.core.timezone import now_bolivia
+    return now_bolivia()
+
 
 class OperationType(str, Enum):
     create = "create"
@@ -50,7 +56,7 @@ class SyncResponse(BaseModel):
     failed_items: int
     conflicted_items: int
     results: List[SyncItemResult]
-    server_timestamp: datetime = Field(default_factory=datetime.utcnow)
+    server_timestamp: datetime = Field(default_factory=_now_bolivia)
 
 
 class SyncStatusResponse(BaseModel):

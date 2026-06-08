@@ -4,6 +4,12 @@ from app.db.base_class import Base
 import enum
 from datetime import datetime
 
+# Importar función para hora de Bolivia
+def _now_bolivia():
+    """Importación lazy para evitar circular imports"""
+    from app.core.timezone import now_bolivia
+    return now_bolivia()
+
 
 class OperationType(str, enum.Enum):
     create = "create"
@@ -38,7 +44,7 @@ class SyncQueue(Base):
     status = Column(SQLEnum(SyncStatus), nullable=False, default=SyncStatus.pending)
     retry_count = Column(Integer, nullable=False, default=0)
     error_message = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+    created_at = Column(TIMESTAMP, nullable=False, default=_now_bolivia)
     processed_at = Column(TIMESTAMP, nullable=True)
     user_id = Column(Integer, nullable=True)  # Usuario que originó la sync
 
@@ -59,7 +65,7 @@ class SyncLog(Base):
     status = Column(String(50), nullable=False)  # success, conflict, error
     error_message = Column(Text, nullable=True)
     client_timestamp = Column(TIMESTAMP, nullable=True)  # Timestamp del cliente
-    server_timestamp = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+    server_timestamp = Column(TIMESTAMP, nullable=False, default=_now_bolivia)
     user_id = Column(Integer, nullable=True)
     ip_address = Column(String(45), nullable=True)
 

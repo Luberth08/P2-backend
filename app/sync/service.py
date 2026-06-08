@@ -10,6 +10,7 @@ from datetime import datetime
 
 from app.sync.models import SyncQueue, SyncLog, SyncStatus, OperationType, EntityType
 from app.sync.schemas import SyncRequest, SyncItem, SyncItemResult, SyncResponse
+from app.core.timezone import now_bolivia, parse_iso_to_bolivia
 from app.crud import (
     solicitud_servicio as solicitud_servicio_crud,
     diagnostico as diagnostico_crud,
@@ -148,14 +149,35 @@ class SyncService:
             )
             
         except Exception as e:
-            logger.error(f"Error ejecutando operación para {item.client_sync_id}: {e}")
+            error_msg = str(e)
+            logger.error(f"Error ejecutando operación para {item.client_sync_id}: {error_msg}")
+            
+            # Verificar si es un error de duplicado (unique constraint violation)
+            if 'unique constraint' in error_msg.lower() or 'duplicate' in error_msg.lower():
+                logger.warning(f"Duplicado detectado para {item.client_sync_id}, marcando como success")
+                await self._log_sync_operation(
+                    item,
+                    user_id,
+                    ip_address,
+                    status="success",
+                    server_entity_id=None,
+                    error_message=f"Duplicado (ignorado): {error_msg}"
+                )
+                # Retornar success para evitar reintento
+                return SyncItemResult(
+                    client_sync_id=item.client_sync_id,
+                    status="success",
+                    error_message="Item ya existe (duplicado)"
+                )
+            
+            # Para otros errores, registrar y lanzar
             await self._log_sync_operation(
                 item,
                 user_id,
                 ip_address,
                 status="error",
                 server_entity_id=None,
-                error_message=str(e)
+                error_message=error_msg
             )
             raise
     
@@ -198,23 +220,190 @@ class SyncService:
     
     async def _create_entity(self, item: SyncItem) -> int:
         """Crea una entidad según su tipo"""
-        payload = item.payload
+        # Crear una copia mutable del payload para no modificar el original
+        payload = dict(item.payload) if item.payload else {}
         
-        if item.entity_type == EntityType.solicitud_servicio:
-            entity = await solicitud_servicio_crud.create(self.db, payload)
-            return entity.id
-        elif item.entity_type == EntityType.diagnostico:
-            entity = await diagnostico_crud.create(self.db, payload)
-            return entity.id
-        elif item.entity_type == EntityType.servicio:
-            entity = await servicio_crud.create(self.db, payload)
-            return entity.id
-        elif item.entity_type == EntityType.incidente:
-            entity = await incidente_crud.create(self.db, payload)
-            # Incidente tiene clave compuesta, retornamos el id_diagnostico
-            return entity.id_diagnostico
-        else:
-            raise ValueError(f"Tipo de entidad no soportado: {item.entity_type}")
+        logger.info(f"Creating entity {item.entity_type} with payload: {payload}")
+        
+        try:
+            if item.entity_type == EntityType.solicitud_servicio:
+                # Mapear fecha_solicitud a fecha si existe
+                if 'fecha_solicitud' in payload:
+                    payload['fecha'] = payload.pop('fecha_solicitud')
+                
+                # Agregar fecha si no existe
+                if 'fecha' not in payload:
+                    payload['fecha'] = now_bolivia()
+                
+                # Convertir fecha a datetime si es string
+                if isinstance(payload.get('fecha'), str):
+                    payload['fecha'] = parse_iso_to_bolivia(payload['fecha'])
+                
+                # Validar campos requeridos
+                if 'id_diagnostico' not in payload:
+                    raise ValueError("id_diagnostico es requerido para solicitud_servicio")
+                if 'id_taller' not in payload:
+                    raise ValueError("id_taller es requerido para solicitud_servicio")
+                if 'sugerido_por' not in payload:
+                    payload['sugerido_por'] = 'conductor'  # Default
+                
+                # Verificar que existan las foreign keys
+                from app.models.diagnostico import Diagnostico
+                from app.models.taller import Taller
+                
+                diagnostico = await self.db.get(Diagnostico, payload['id_diagnostico'])
+                if not diagnostico:
+                    raise ValueError(f"No existe diagnóstico con id {payload['id_diagnostico']}")
+                
+                taller = await self.db.get(Taller, payload['id_taller'])
+                if not taller:
+                    raise ValueError(f"No existe taller con id {payload['id_taller']}")
+                
+                entity = await solicitud_servicio_crud.create(self.db, payload)
+                return entity.id
+                
+            elif item.entity_type == EntityType.diagnostico:
+                entity = await diagnostico_crud.create(self.db, payload)
+                return entity.id
+                
+            elif item.entity_type == EntityType.servicio:
+                # Extraer tecnicos_ids y vehiculos_ids (no son parte del modelo)
+                tecnicos_ids = payload.pop('tecnicos_ids', [])
+                vehiculos_ids = payload.pop('vehiculos_ids', [])
+                
+                # Validar campos requeridos
+                if 'id_taller' not in payload:
+                    raise ValueError("id_taller es requerido para servicio")
+                if 'id_solicitud_servicio' not in payload:
+                    raise ValueError("id_solicitud_servicio es requerido para servicio")
+                
+                # DUPLICATE DETECTION: Verificar si ya existe un servicio para esta solicitud
+                from app.models.servicio import Servicio
+                try:
+                    existing_query = await self.db.execute(
+                        select(Servicio).where(
+                            and_(
+                                Servicio.id_solicitud_servicio == payload['id_solicitud_servicio'],
+                                Servicio.id_taller == payload['id_taller']
+                            )
+                        )
+                    )
+                    existing_service = existing_query.scalar_one_or_none()
+                    
+                    if existing_service:
+                        logger.info(f"✅ Servicio ya existe para solicitud {payload['id_solicitud_servicio']}, taller {payload['id_taller']}, retornando id existente: {existing_service.id}")
+                        return existing_service.id
+                except Exception as e:
+                    logger.error(f"Error verificando servicio existente: {e}")
+                
+                # Agregar defaults
+                if 'fecha' not in payload:
+                    payload['fecha'] = now_bolivia()
+                if 'estado' not in payload:
+                    payload['estado'] = 'creado'
+                
+                # Crear el servicio
+                entity = await servicio_crud.create(self.db, payload)
+                
+                # IMPORTANTE: Actualizar estado de la solicitud a "aceptada"
+                from app.models.solicitud_servicio import EstadoSolicitudServicio
+                from app.crud import solicitud_servicio as solicitud_servicio_crud
+                try:
+                    await solicitud_servicio_crud.update_estado(
+                        self.db,
+                        payload['id_solicitud_servicio'],
+                        EstadoSolicitudServicio.aceptada
+                    )
+                    logger.info(f"Estado de solicitud {payload['id_solicitud_servicio']} actualizado a 'aceptada'")
+                except Exception as e:
+                    logger.warning(f"No se pudo actualizar estado de solicitud: {e}")
+                
+                # Asignar técnicos si se proporcionaron
+                if tecnicos_ids:
+                    from app.models.servicio_tecnico import ServicioTecnico
+                    from app.models.empleado import EstadoEmpleado
+                    from app.crud import empleado as empleado_crud
+                    
+                    for tecnico_id in tecnicos_ids:
+                        # Verificar si ya existe la asignación
+                        existing_tecnico_query = await self.db.execute(
+                            select(ServicioTecnico).where(
+                                and_(
+                                    ServicioTecnico.id_servicio == entity.id,
+                                    ServicioTecnico.id_empleado == tecnico_id
+                                )
+                            )
+                        )
+                        existing_tecnico = existing_tecnico_query.scalar_one_or_none()
+                        
+                        if not existing_tecnico:
+                            servicio_tecnico = ServicioTecnico(
+                                id_servicio=entity.id,
+                                id_empleado=tecnico_id
+                            )
+                            self.db.add(servicio_tecnico)
+                            
+                            # Actualizar estado del técnico a "en_servicio"
+                            try:
+                                empleado = await empleado_crud.get(self.db, tecnico_id)
+                                if empleado and empleado.estado == EstadoEmpleado.disponible:
+                                    empleado.estado = EstadoEmpleado.en_servicio
+                                    logger.info(f"Estado de técnico {tecnico_id} actualizado a 'en_servicio'")
+                            except Exception as e:
+                                logger.warning(f"No se pudo actualizar estado de técnico {tecnico_id}: {e}")
+                    
+                    await self.db.flush()
+                
+                # Asignar vehículos si se proporcionaron
+                if vehiculos_ids:
+                    from app.models.servicio_vehiculo import ServicioVehiculo
+                    from app.models.vehiculo_taller import EstadoVehiculoTaller, VehiculoTaller
+                    
+                    for vehiculo_id in vehiculos_ids:
+                        # Verificar si ya existe la asignación
+                        existing_vehiculo_query = await self.db.execute(
+                            select(ServicioVehiculo).where(
+                                and_(
+                                    ServicioVehiculo.id_servicio == entity.id,
+                                    ServicioVehiculo.id_vehiculo_taller == vehiculo_id
+                                )
+                            )
+                        )
+                        existing_vehiculo = existing_vehiculo_query.scalar_one_or_none()
+                        
+                        if not existing_vehiculo:
+                            servicio_vehiculo = ServicioVehiculo(
+                                id_servicio=entity.id,
+                                id_vehiculo_taller=vehiculo_id
+                            )
+                            self.db.add(servicio_vehiculo)
+                            
+                            # Actualizar estado del vehículo a "en_servicio"
+                            try:
+                                vehiculo_query = await self.db.execute(
+                                    select(VehiculoTaller).where(VehiculoTaller.id == vehiculo_id)
+                                )
+                                vehiculo = vehiculo_query.scalar_one_or_none()
+                                if vehiculo and vehiculo.estado == EstadoVehiculoTaller.disponible:
+                                    vehiculo.estado = EstadoVehiculoTaller.en_servicio
+                                    logger.info(f"Estado de vehículo {vehiculo_id} actualizado a 'en_servicio'")
+                            except Exception as e:
+                                logger.warning(f"No se pudo actualizar estado de vehículo {vehiculo_id}: {e}")
+                    
+                    await self.db.flush()
+                
+                logger.info(f"Servicio {entity.id} creado con {len(tecnicos_ids)} técnicos y {len(vehiculos_ids)} vehículos")
+                return entity.id
+                
+            elif item.entity_type == EntityType.incidente:
+                entity = await incidente_crud.create(self.db, payload)
+                # Incidente tiene clave compuesta, retornamos el id_diagnostico
+                return entity.id_diagnostico
+            else:
+                raise ValueError(f"Tipo de entidad no soportado: {item.entity_type}")
+        except Exception as e:
+            logger.error(f"Error creando entidad {item.entity_type}: {str(e)}, payload: {payload}")
+            raise
     
     async def _update_entity(self, item: SyncItem) -> int:
         """Actualiza una entidad según su tipo"""
@@ -224,14 +413,24 @@ class SyncService:
         if not entity_id:
             raise ValueError("Se requiere entity_id para operaciones de update")
         
+        # Primero obtenemos la entidad existente
         if item.entity_type == EntityType.solicitud_servicio:
-            entity = await solicitud_servicio_crud.update(self.db, entity_id, payload)
+            db_obj = await solicitud_servicio_crud.get(self.db, entity_id)
+            if not db_obj:
+                raise ValueError(f"SolicitudServicio con id {entity_id} no encontrada")
+            entity = await solicitud_servicio_crud.update(self.db, db_obj, payload)
             return entity.id
         elif item.entity_type == EntityType.diagnostico:
-            entity = await diagnostico_crud.update(self.db, entity_id, payload)
+            db_obj = await diagnostico_crud.get(self.db, entity_id)
+            if not db_obj:
+                raise ValueError(f"Diagnostico con id {entity_id} no encontrado")
+            entity = await diagnostico_crud.update(self.db, db_obj, payload)
             return entity.id
         elif item.entity_type == EntityType.servicio:
-            entity = await servicio_crud.update(self.db, entity_id, payload)
+            db_obj = await servicio_crud.get(self.db, entity_id)
+            if not db_obj:
+                raise ValueError(f"Servicio con id {entity_id} no encontrado")
+            entity = await servicio_crud.update(self.db, db_obj, payload)
             return entity.id
         else:
             raise ValueError(f"Update no soportado para entidad: {item.entity_type}")
@@ -265,6 +464,11 @@ class SyncService:
         error_message: Optional[str] = None
     ):
         """Registra la operación de sincronización en el log"""
+        # Convertir client_timestamp a naive datetime si tiene timezone
+        client_ts = item.client_timestamp
+        if client_ts and hasattr(client_ts, 'tzinfo') and client_ts.tzinfo is not None:
+            client_ts = client_ts.replace(tzinfo=None)
+        
         log_entry = SyncLog(
             operation_type=item.operation_type,
             entity_type=item.entity_type,
@@ -272,8 +476,8 @@ class SyncService:
             server_entity_id=server_entity_id,
             status=status,
             error_message=error_message,
-            client_timestamp=item.client_timestamp,
-            server_timestamp=datetime.utcnow(),
+            client_timestamp=client_ts,
+            server_timestamp=now_bolivia(),
             user_id=user_id,
             ip_address=ip_address
         )

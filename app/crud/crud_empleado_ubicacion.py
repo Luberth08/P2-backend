@@ -10,16 +10,24 @@ class CRUDEmpleadoUbicacion(CRUDBase[EmpleadoUbicacion]):
     async def get_ubicacion_activa(
         self,
         db: AsyncSession,
-        id_empleado: int
+        id_empleado: int,
+        id_servicio: Optional[int] = None
     ) -> Optional[EmpleadoUbicacion]:
-        """Obtiene la ubicación activa de un empleado"""
+        """
+        Obtiene la ubicación activa de un empleado.
+        Si se proporciona id_servicio, filtra solo ubicaciones de ese servicio.
+        """
+        conditions = [
+            EmpleadoUbicacion.id_empleado == id_empleado,
+            EmpleadoUbicacion.activa == True
+        ]
+        
+        if id_servicio is not None:
+            conditions.append(EmpleadoUbicacion.id_servicio == id_servicio)
+        
         result = await db.execute(
-            select(EmpleadoUbicacion).where(
-                and_(
-                    EmpleadoUbicacion.id_empleado == id_empleado,
-                    EmpleadoUbicacion.activa == True
-                )
-            ).order_by(EmpleadoUbicacion.timestamp.desc())
+            select(EmpleadoUbicacion).where(and_(*conditions))
+            .order_by(EmpleadoUbicacion.timestamp.desc())
         )
         return result.scalar_one_or_none()
     

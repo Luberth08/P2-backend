@@ -123,15 +123,15 @@ async def obtener_servicio_actual(
         if empleado:
             print(f"👤 DEBUG - Técnico {empleado.id}: {empleado.usuario.nombre}")
             
-            # Obtener ubicación activa del técnico
+            # Obtener ubicación activa del técnico PARA ESTE SERVICIO específico
             ubicacion = await crud_empleado_ubicacion.empleado_ubicacion.get_ubicacion_activa(
-                db, empleado.id
+                db, empleado.id, id_servicio=servicio.id
             )
             
             if ubicacion:
                 print(f"📍 DEBUG - Ubicación encontrada: lat={ubicacion.latitud}, lon={ubicacion.longitud}, timestamp={ubicacion.timestamp}")
             else:
-                print(f"⚠️ DEBUG - No hay ubicación activa para técnico {empleado.id}")
+                print(f"⚠️ DEBUG - No hay ubicación activa para técnico {empleado.id} en servicio {servicio.id}")
             
             tecnicos_response.append(TecnicoUbicacionResponse(
                 id_empleado=empleado.id,
@@ -238,15 +238,15 @@ async def obtener_ruta_tecnico(
     if not asignacion:
         raise HTTPException(status_code=404, detail="Técnico no asignado a este servicio")
     
-    # Obtener ubicación del técnico
+    # Obtener ubicación del técnico PARA ESTE SERVICIO específico
     ubicacion_tecnico = await crud_empleado_ubicacion.empleado_ubicacion.get_ubicacion_activa(
-        db, empleado_id
+        db, empleado_id, id_servicio=servicio_id
     )
     
     if not ubicacion_tecnico:
         raise HTTPException(
             status_code=404,
-            detail="El técnico no tiene ubicación disponible"
+            detail="El técnico no tiene ubicación disponible para este servicio"
         )
     
     # Obtener ubicación del cliente
